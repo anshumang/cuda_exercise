@@ -1,5 +1,6 @@
 #include <cuda.h>
 #include <stdio.h>
+#include <sys/time.h>
 
 #define CUDA(fn) do {                           \
         cudaError_t err = fn;                   \
@@ -16,6 +17,16 @@ filter_device_kernel(const float *input, int ilen,
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     float sum = 0;
     // TODO: WRITE FILTER CODE HERE
+    int w = klen / 2;
+
+    // Checking for edge conditions
+    int start = tid < w ? 0 : (tid - w);
+    int end = tid >= (ilen - w) ? ilen /*(ilen - 1)*/ : (tid + w); //Should use ilen because the loop upper bound below is <
+
+    // Perform the filter operation
+    for (int i = start; i < end; i++) {
+        sum += input[i] * kernel[i - tid + w];
+    }
 
     if (tid < ilen) output[tid] = sum;
 }
@@ -26,6 +37,8 @@ cudaError_t filter_device(const float *input , int ilen,
 {
     dim3 blocks(1,1), threads(1,1);
     // TODO: CALCULATE OPTIMUM BLOCKS AND THREADS HERE
+    blocks.x = ilen/klen; blocks.y = 1;
+    threads.x = klen; threads.y = 1; 
 
     filter_device_kernel<<<blocks, threads>>>(input, ilen,
                                               kernel, klen,
@@ -92,9 +105,20 @@ int main()
     CUDA(cudaMemcpy(d_input, h_input, ibytes, cudaMemcpyHostToDevice));
     CUDA(cudaMemcpy(d_kernel, h_kernel, kbytes, cudaMemcpyHostToDevice));
 
+    timeval start, stop, diff;
+
     // Calculate
+    gettimeofday(&start, NULL);
     CUDA(filter_host(h_input, ILEN, h_kernel, KLEN, h_output));
+    gettimeofday(&stop, NULL);
+    timersub(&stop, &start, &diff);
+    printf("Time on CPU : %ld us\n", diff.tv_sec * 1000000 + diff.tv_usec);
+
+    gettimeofday(&start, NULL);
     CUDA(filter_device(d_input, ILEN, d_kernel, KLEN, d_output));
+    gettimeofday(&stop, NULL);
+    timersub(&stop, &start, &diff);
+    printf("Time on GPU : %ld us\n", diff.tv_sec * 1000000 + diff.tv_usec);
 
     // Copy data back from GPU
     CUDA(cudaMemcpy(h_result, d_output, ibytes, cudaMemcpyDeviceToHost));
@@ -102,7 +126,9 @@ int main()
     // Error checking
     float err = 0.0;
     for (int i = 0; i < ILEN; i++) {
-        float diff = h_result[i];// - h_output[i];
+        //if(i < 10)
+	  //printf("h_result[%d]=%lf, h_output[%d]=%lf\n", i, h_result[i], i, h_output[i]);
+        float diff = h_result[i] - h_output[i];
         err = err + diff * diff;
     }
     err = err / ILEN;
