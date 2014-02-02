@@ -26,6 +26,10 @@ filter_device_kernel(const float *input, int ilen,
 
     int w = klen / 2;
 
+#if __DEBUG__ && __CUDA_ARCH__ >= 200
+    printf("Hi Cuda World");
+#endif
+
 #if __NAIVE__
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -139,6 +143,28 @@ cudaError_t filter_host(const float *input , int ilen,
 
 int main()
 {
+
+    int deviceCount;
+    cudaGetDeviceCount(&deviceCount);
+    if (deviceCount == 0) {
+      printf("No CUDA compatible device found\n");
+      exit(EXIT_FAILURE);
+    }
+    printf("%d CUDA compatible devices found\n", deviceCount);
+
+
+    cudaDeviceProp prop;
+    int dev = 0;
+
+    while(dev < deviceCount) {
+      if (cudaGetDeviceProperties(&prop, dev) == cudaSuccess)
+        printf("Device %d %s compute v%d.%d sharedMemPerBlock %d maxThreadsPerBlock %d maxThreadsDim.x %d maxGridSize.x %d multiProcessorCount %d maxThreadsPerMultiProcessor %d\n", dev, prop.name, prop.major, prop.minor, prop.sharedMemPerBlock, prop.maxThreadsPerBlock, prop.maxThreadsDim[0], prop.maxGridSize[0], prop.multiProcessorCount, prop.maxThreadsPerMultiProcessor);
+      dev++;
+    }
+
+    dev = 0; //dev0:C2070 dev1:C2050 on shiva
+    cudaSetDevice(dev);
+
     float *h_input, *h_kernel;
     float *h_output, *h_result;
 
