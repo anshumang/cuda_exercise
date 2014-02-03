@@ -10,8 +10,8 @@
     } while (0)
 
 
-#define __NAIVE__ 1
-#define __USING_SMEM__ 0
+#define __NAIVE__ 0
+#define __USING_SMEM__ 1
 #define __DEBUG__ 1
 #define __PROFILE__ 1
 #define BLOCK_SIZE 1024
@@ -25,10 +25,6 @@ filter_device_kernel(const float *input, int ilen,
     // TODO: WRITE FILTER CODE HERE
 
     int w = klen / 2;
-
-#if __DEBUG__ && __CUDA_ARCH__ >= 200
-    printf("Hi Cuda World");
-#endif
 
 #if __NAIVE__
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -51,7 +47,6 @@ filter_device_kernel(const float *input, int ilen,
     int local_tid = threadIdx.x;
     int nb = (ilen+BLOCK_SIZE-1)/BLOCK_SIZE;
  
-    //int size = BLOCK_SIZE+2*w;
     extern __shared__ float input_shared[]; 
 
     if(local_tid>0 && local_tid<BLOCK_SIZE-1)
@@ -61,15 +56,17 @@ filter_device_kernel(const float *input, int ilen,
         for (unsigned i=0; i<=w; i++)
           input_shared[w-i] = input[tid-i];
       else //bid == 0
-        for (unsigned i=0; i<=w; i++)
-          input_shared[w-i] = input[tid];
+        input_shared[w] = input[tid]; //input_shared[0:w-1] unused
+        //for (unsigned i=0; i<=w; i++)
+          //input_shared[w-i] = input[tid];
     else // local_tid == BLOCK_SIZE-1
       if(bid<nb-1)
         for (unsigned i=0; i<=w; i++)
           input_shared[local_tid+w+i] = input[tid+i];
       else //bid == nb-1
-        for (unsigned i=0; i<=w; i++)
-          input_shared[local_tid+w+i] = input[tid];
+        input_shared[local_tid+w] = input[tid]; //input_shared[BLOCK_SIZE:BLOCK_SIZE+w-1] unused
+        //for (unsigned i=0; i<=w; i++)
+          //input_shared[local_tid+w+i] = input[tid];
 
     __syncthreads();
 
@@ -77,7 +74,11 @@ filter_device_kernel(const float *input, int ilen,
     int end = tid >= (ilen - w) ? BLOCK_SIZE - 1  : local_tid + w;
 
     for (int i = start; i < end; i++) {
-        sum += input_shared[i] * kernel[i - local_tid + w];
+        //sum += input_shared[i] * kernel[i - local_tid + w];
+        float sval = input_shared[i];
+        float val = kernel[i - local_tid + w];
+        float res = sval*val;
+        sum = sum + res;
     }
 
     if (tid < ilen) output[tid] = sum;
@@ -101,7 +102,7 @@ cudaError_t filter_device(const float *input , int ilen,
 #endif
 
 #if __USING_SMEM__
-    blocks.x = ilen+(BLOCK_SIZE - 1)/BLOCK_SIZE; blocks.y = 1;
+    blocks.x = (ilen+BLOCK_SIZE - 1)/BLOCK_SIZE; blocks.y = 1;
     threads.x = BLOCK_SIZE; threads.y = 1;
 
     filter_device_kernel<<<blocks, threads, (BLOCK_SIZE+klen)*sizeof(float)>>>(input, ilen,
