@@ -104,6 +104,10 @@ filter_device_kernel_smem(const float *input, int ilen,
           input_shared[local_tid+w+i] = input[tid+i];
       else //bid == nb-1
         input_shared[local_tid+w] = input[tid]; //input_shared[BLOCK_SIZE:BLOCK_SIZE+w-1] unused
+#if __USING_SMEM_FOR_KERNEL_ARR__
+    if(tid<klen)
+      input_shared[BLOCK_SIZE+klen+tid] = kernel[tid];
+#endif
 
     __syncthreads();
 
@@ -120,6 +124,9 @@ filter_device_kernel_smem(const float *input, int ilen,
 
     for (int i = start; i < end; i++) {
         float res = input_shared[i] * kernel[i - local_tid];
+#if __USING_SMEM_FOR_KERNEL_ARR__
+        float res = input_shared[i] * input_shared[BLOCK_SIZE + klen + i - local_tid];
+#endif
         sum = sum + res;
 #if __DEBUG__
         if(tid == 0){
@@ -185,11 +192,11 @@ cudaError_t filter_device_smem(const float *input , int ilen,
     threads.x = BLOCK_SIZE; threads.y = 1;
 
 #if __DEBUG__
-    filter_device_kernel_smem<<<blocks, threads, (BLOCK_SIZE+klen)*sizeof(float)>>>(input, ilen,
+    filter_device_kernel_smem<<<blocks, threads, (BLOCK_SIZE+2*klen)*sizeof(float)>>>(input, ilen,
                                               kernel, klen,
                                               output, debug1, debug2, debug3, debug4);
 #else
-    filter_device_kernel_smem<<<blocks, threads, (BLOCK_SIZE+klen)*sizeof(float)>>>(input, ilen,
+    filter_device_kernel_smem<<<blocks, threads, (BLOCK_SIZE+2*klen)*sizeof(float)>>>(input, ilen,
                                               kernel, klen,
                                               output);
 #endif 
