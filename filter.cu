@@ -249,6 +249,7 @@ int main()
     }
 
     dev = 0; //dev0:C2070 dev1:C2050 on shiva
+    printf("Using Device %d\n", dev);
     cudaSetDevice(dev);
 
     float *h_input, *h_kernel;
