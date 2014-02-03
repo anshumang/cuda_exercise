@@ -10,16 +10,23 @@
     } while (0)
 
 
-#define __NAIVE__ 0
+#define __NAIVE__ 1
 #define __USING_SMEM__ 1
-#define __DEBUG__ 1
+#define __DEBUG__ 0
 #define __PROFILE__ 1
 #define BLOCK_SIZE 1024
 
+#if __DEBUG__
 __global__ static void
 filter_device_kernel(const float *input, int ilen,
                      const float *kernel, int klen,
                      float *output, float *debug1, float *debug2, float *debug3, float *debug4)
+#else
+__global__ static void
+filter_device_kernel(const float *input, int ilen,
+                     const float *kernel, int klen,
+                     float *output)
+#endif
 {
     float sum = 0;
     // TODO: WRITE FILTER CODE HERE
@@ -33,25 +40,42 @@ filter_device_kernel(const float *input, int ilen,
     int start = tid < w ? 0 : (tid - w);
     int end = tid >= (ilen - w) ? ilen /*(ilen - 1)*/ : (tid + w); //Should use ilen because the loop upper bound below is <
 
+#if __DEBUG__
+    if(tid == 0){
+      for(int i = 0; i < klen; i++){
+        debug1[i] = 0; debug2[i] = 0; debug3[i] = 0; debug4[i] = 0;
+      }
+    }
+#endif
+
     // Perform the filter operation
     for (int i = start; i < end; i++) {
         sum += input[i] * kernel[i - tid + w];
+#if __DEBUG__
         if(tid == 0){
           debug1[i] = input[i];
           debug2[i] = kernel[i - tid + w];
           debug3[i] = input[i] * kernel[i - tid + w];
           debug4[i] = sum;
         }
+#endif
     }
 
     if (tid < ilen) output[tid] = sum;
 #endif
 }
 
+#if __DEBUG__
 __global__ static void
 filter_device_kernel_smem(const float *input, int ilen,
                      const float *kernel, int klen,
                      float *output, float *debug1, float *debug2, float *debug3, float *debug4)
+#else
+__global__ static void
+filter_device_kernel_smem(const float *input, int ilen,
+                     const float *kernel, int klen,
+                     float *output)
+#endif
 {
     float sum = 0;
     // TODO: WRITE FILTER CODE HERE
@@ -83,29 +107,28 @@ filter_device_kernel_smem(const float *input, int ilen,
 
     __syncthreads();
 
-    //int start = tid < w ? 0 : (tid - w);
-    //int end = tid >= (ilen - w) ? ilen /*(ilen - 1)*/ : (tid + w);
-
     int start = tid < w ? w : local_tid;
     int end = tid >= (ilen - w) ? BLOCK_SIZE + w - 1 : local_tid + 2*w;
 
+#if __DEBUG__
     if(tid == 0){
       for(int i = 0; i < klen; i++){
         debug1[i] = 0; debug2[i] = 0; debug3[i] = 0; debug4[i] = 0;
       }
     }
+#endif
 
     for (int i = start; i < end; i++) {
-        //sum += input_shared[i] * kernel[i - local_tid + w];
         float res = input_shared[i] * kernel[i - local_tid];
-        //if(local_tid == BLOCK_SIZE-1)
-          sum = sum + res;
+        sum = sum + res;
+#if __DEBUG__
         if(tid == 0){
           debug1[i] = input_shared[i];
           debug2[i] = kernel[i - local_tid];
           debug3[i] = input_shared[i] * kernel[i - local_tid];
           debug4[i] = sum;
         }
+#endif
     }
 
     if (tid < ilen) output[tid] = sum;
@@ -113,9 +136,15 @@ filter_device_kernel_smem(const float *input, int ilen,
 
 }
 
+#if __DEBUG__
 cudaError_t filter_device(const float *input , int ilen,
                           const float *kernel, int klen,
                           float *output, float *debug1, float *debug2, float *debug3, float *debug4)
+#else
+cudaError_t filter_device(const float *input , int ilen,
+                          const float *kernel, int klen,
+                          float *output)
+#endif
 {
     dim3 blocks(1,1), threads(1,1);
     // TODO: CALCULATE OPTIMUM BLOCKS AND THREADS HERE
@@ -123,17 +152,30 @@ cudaError_t filter_device(const float *input , int ilen,
     blocks.x = ilen/klen; blocks.y = 1;
     threads.x = klen; threads.y = 1;
 
+#if __DEBUG__
     filter_device_kernel<<<blocks, threads>>>(input, ilen,
                                               kernel, klen,
                                               output, debug1, debug2, debug3, debug4);
+#else
+    filter_device_kernel<<<blocks, threads>>>(input, ilen,
+                                              kernel, klen,
+                                              output);
+#endif
+
 #endif
 
     return cudaSuccess;
 }
 
+#if __DEBUG__
 cudaError_t filter_device_smem(const float *input , int ilen,
                           const float *kernel, int klen,
                           float *output, float *debug1, float *debug2, float *debug3, float *debug4)
+#else
+cudaError_t filter_device_smem(const float *input , int ilen,
+                          const float *kernel, int klen,
+                          float *output)
+#endif
 {
     dim3 blocks(1,1), threads(1,1);
     // TODO: CALCULATE OPTIMUM BLOCKS AND THREADS HERE
@@ -142,9 +184,16 @@ cudaError_t filter_device_smem(const float *input , int ilen,
     blocks.x = (ilen+BLOCK_SIZE - 1)/BLOCK_SIZE; blocks.y = 1;
     threads.x = BLOCK_SIZE; threads.y = 1;
 
+#if __DEBUG__
     filter_device_kernel_smem<<<blocks, threads, (BLOCK_SIZE+klen)*sizeof(float)>>>(input, ilen,
                                               kernel, klen,
                                               output, debug1, debug2, debug3, debug4);
+#else
+    filter_device_kernel_smem<<<blocks, threads, (BLOCK_SIZE+klen)*sizeof(float)>>>(input, ilen,
+                                              kernel, klen,
+                                              output);
+#endif 
+
 #endif 
 
     return cudaSuccess;
@@ -267,7 +316,11 @@ int main()
 #if __PROFILE__
     gettimeofday(&start, NULL);
 #endif
+#if __DEBUG__
     CUDA(filter_device(d_input, ILEN, d_kernel, KLEN, d_output, d_debug1, d_debug2, d_debug3, d_debug4));
+#else
+    CUDA(filter_device(d_input, ILEN, d_kernel, KLEN, d_output));
+#endif
     CUDA(cudaDeviceSynchronize());
 #if __PROFILE__
     gettimeofday(&stop, NULL);
@@ -277,6 +330,7 @@ int main()
 
     // Copy data back from GPU
     CUDA(cudaMemcpy(h_result, d_output, ibytes, cudaMemcpyDeviceToHost));
+
 #if __DEBUG__
     CUDA(cudaMemcpy(h_debug1, d_debug1, kbytes, cudaMemcpyDeviceToHost));
     CUDA(cudaMemcpy(h_debug2, d_debug2, kbytes, cudaMemcpyDeviceToHost));
@@ -307,7 +361,13 @@ int main()
 #if __PROFILE__
     gettimeofday(&start, NULL);
 #endif
+
+#if __DEBUG__
     CUDA(filter_device_smem(d_input, ILEN, d_kernel, KLEN, d_output, d_debug1, d_debug2, d_debug3, d_debug4));
+#else
+    CUDA(filter_device_smem(d_input, ILEN, d_kernel, KLEN, d_output));
+#endif
+
     CUDA(cudaDeviceSynchronize());
 #if __PROFILE__
     gettimeofday(&stop, NULL);
@@ -317,6 +377,7 @@ int main()
 
     // Copy data back from GPU
     CUDA(cudaMemcpy(h_result, d_output, ibytes, cudaMemcpyDeviceToHost));
+
 #if __DEBUG__
     for (int i = 0; i < KLEN; i++){
       h_debug1[i] = 0;
